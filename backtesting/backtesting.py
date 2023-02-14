@@ -936,7 +936,6 @@ class _Broker:
             # If order size was specified proportionally,
             # precompute true size in units, accounting for margin and spread/commissions
 
-
             if (order.size or order.portion) > 0:
                 sign = 1
             else:
@@ -946,8 +945,9 @@ class _Broker:
             if order.portion is not None:
                 need_size = copysign(self.margin_available * self._leverage * abs(order.portion) / adjusted_price, order.portion)
                 size = copysign(self.margin_available * self._leverage * abs(order.portion) / price, order.portion)
+
             else:
-                need_size = copysign(self.margin_available * self._leverage * abs(order.size) / adjusted_price, order.size)
+                need_size = order.size
                 size = order.size
 
 
@@ -962,6 +962,7 @@ class _Broker:
 
                     # Order size greater than this opposite-directed existing trade,
                     # so it will be closed completely
+
                     if abs(need_size) >= abs(trade.size):
                         self._close_trade(trade, price, time_index)
                         need_size += trade.size
@@ -1044,7 +1045,7 @@ class _Broker:
         self.closed_trades.append(trade._replace(exit_price=price, exit_bar=time_index))
         self._cash += trade.pl
 
-    def _open_trade(self, price: float, size: int,
+    def _open_trade(self, price: float, size: float,
                     sl: Optional[float], tp: Optional[float], time_index: int, tag):
         trade = Trade(self, size, price, time_index, tag)
         self.trades.append(trade)
