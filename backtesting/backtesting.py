@@ -24,6 +24,7 @@ from numpy.random import default_rng
 
 try:
     from tqdm.auto import tqdm as _tqdm
+
     _tqdm = partial(_tqdm, leave=False)
 except ImportError:
     def _tqdm(seq, **_):
@@ -49,6 +50,7 @@ class Strategy(metaclass=ABCMeta):
     `backtesting.backtesting.Strategy.next` to define
     your own strategy.
     """
+
     def __init__(self, broker, data, params):
         self._indicators = []
         self._broker: _Broker = broker
@@ -143,7 +145,7 @@ class Strategy(metaclass=ABCMeta):
             raise ValueError(
                 'Indicators must return (optionally a tuple of) numpy.arrays of same '
                 f'length as `data` (data shape: {self._data.Close.shape}; indicator "{name}" '
-                f'shape: {getattr(value, "shape" , "")}, returned value: {value})')
+                f'shape: {getattr(value, "shape", "")}, returned value: {value})')
 
         if plot and overlay is None and np.issubdtype(value.dtype, np.number):
             x = value / self._data.Close
@@ -192,6 +194,7 @@ class Strategy(metaclass=ABCMeta):
 
     class __FULL_EQUITY(float):  # noqa: N801
         def __repr__(self): return '.9999'
+
     _FULL_EQUITY = __FULL_EQUITY(1 - sys.float_info.epsilon)
 
     def buy(self, *,
@@ -209,22 +212,22 @@ class Strategy(metaclass=ABCMeta):
 
         See also `Strategy.sell()`.
         """
-        assert not((size is None) and (portion is None)), "either size or portion must be specified"
+        assert not ((size is None) and (portion is None)), "either size or portion must be specified"
         if size is not None:
             assert 0 < size, "size must be a positive number"
+            return self._broker.new_order(size, None, limit, stop, sl, tp, tag)
         else:
             assert 0 < portion <= 1, "portion must must be a positive fraction of equity"
-            size = portion * self.cash
-        return self._broker.new_order(size, limit, stop, sl, tp, tag)
+            return self._broker.new_order(None, portion, limit, stop, sl, tp, tag)
 
     def sell(self, *,
-            size: Optional[float] = None,
-            portion: Optional[float] = None,
-            limit: Optional[float] = None,
-            stop: Optional[float] = None,
-            sl: Optional[float] = None,
-            tp: Optional[float] = None,
-            tag: object = None):
+             size: Optional[float] = None,
+             portion: Optional[float] = None,
+             limit: Optional[float] = None,
+             stop: Optional[float] = None,
+             sl: Optional[float] = None,
+             tp: Optional[float] = None,
+             tag: object = None):
         """
         Place a new long order. For explanation of parameters, see `Order` and its properties.
 
@@ -232,13 +235,13 @@ class Strategy(metaclass=ABCMeta):
 
         See also `Strategy.sell()`.
         """
-        assert not((size is None) and (portion is None)), "either size or portion must be specified"
+        assert not ((size is None) and (portion is None)), "either size or portion must be specified"
         if size is not None:
             assert 0 < size, "size must be a positive number"
+            return self._broker.new_order(-size, None, limit, stop, sl, tp, tag)
         else:
             assert 0 < portion <= 1, "portion must must be a positive fraction of equity"
-            size = portion * self.cash
-        return self._broker.new_order(-size, limit, stop, sl, tp, tag)
+            return self._broker.new_order(None, -portion, limit, stop, sl, tp, tag)
 
     @property
     def equity(self) -> float:
@@ -249,6 +252,7 @@ class Strategy(metaclass=ABCMeta):
     def cash(self) -> float:
         """Current account equity (cash plus assets)."""
         return self._broker.cash
+
     @property
     def asset(self) -> float:
         """Current account equity (cash plus assets)."""
@@ -308,6 +312,7 @@ class _Orders(tuple):
     """
     TODO: remove this class. Only for deprecation.
     """
+
     def cancel(self):
         """Cancel all non-contingent (i.e. SL/TP) orders."""
         for order in self:
@@ -335,6 +340,7 @@ class Position:
         if self.position:
             ...  # we have a position, either long or short
     """
+
     def __init__(self, broker: '_Broker'):
         self.__broker = broker
 
@@ -399,8 +405,10 @@ class Order:
     [filled]: https://www.investopedia.com/terms/f/fill.asp
     [Good 'Til Canceled]: https://www.investopedia.com/terms/g/gtc.asp
     """
+
     def __init__(self, broker: '_Broker',
-                 size: float,
+                 size: Optional[float] = None,
+                 portion: Optional[float] = None,
                  limit_price: Optional[float] = None,
                  stop_price: Optional[float] = None,
                  sl_price: Optional[float] = None,
@@ -410,6 +418,8 @@ class Order:
         self.__broker = broker
         assert size != 0
         self.__size = size
+        assert portion != 0
+        self.__portion = portion
         self.__limit_price = limit_price
         self.__stop_price = stop_price
         self.__sl_price = sl_price
@@ -426,6 +436,7 @@ class Order:
         return '<Order {}>'.format(', '.join(f'{param}={round(value, 5)}'
                                              for param, value in (
                                                  ('size', self.__size),
+                                                 ('portion', self.__portion),
                                                  ('limit', self.__limit_price),
                                                  ('stop', self.__stop_price),
                                                  ('sl', self.__sl_price),
@@ -453,12 +464,15 @@ class Order:
     def size(self) -> float:
         """
         Order size (negative for short orders).
-
-        If size is a value between 0 and 1, it is interpreted as a fraction of current
-        available liquidity (cash plus `Position.pl` minus used margin).
-        A value greater than or equal to 1 indicates an absolute number of units.
         """
         return self.__size
+
+    @property
+    def portion(self) -> float:
+        """
+        Order size (negative for short orders).
+        """
+        return self.__portion
 
     @property
     def limit(self) -> Optional[float]:
@@ -518,12 +532,12 @@ class Order:
     @property
     def is_long(self):
         """True if the order is long (order size is positive)."""
-        return self.__size > 0
+        return (self.__size or self.__portion) > 0
 
     @property
     def is_short(self):
         """True if the order is short (order size is negative)."""
-        return self.__size < 0
+        return (self.__size or self.__portion) < 0
 
     @property
     def is_contingent(self):
@@ -545,7 +559,8 @@ class Trade:
     When an `Order` is filled, it results in an active `Trade`.
     Find active trades in `Strategy.trades` and closed, settled trades in `Strategy.closed_trades`.
     """
-    def __init__(self, broker: '_Broker', size: int, entry_price: float, entry_bar, tag):
+
+    def __init__(self, broker: '_Broker', size, entry_price: float, entry_bar, tag):
         self.__broker = broker
         self.__size = size
         self.__entry_price = entry_price
@@ -559,7 +574,7 @@ class Trade:
     def __repr__(self):
         return f'<Trade size={self.__size} time={self.__entry_bar}-{self.__exit_bar or ""} ' \
                f'price={self.__entry_price}-{self.__exit_price or ""} pl={self.pl:.0f}' \
-               f'{" tag="+str(self.__tag) if self.__tag is not None else ""}>'
+               f'{" tag=" + str(self.__tag) if self.__tag is not None else ""}>'
 
     def _replace(self, **kwargs):
         for k, v in kwargs.items():
@@ -740,7 +755,8 @@ class _Broker:
         return f'<Broker: {self._cash:.0f}{self.position.pl:+.1f} ({len(self.trades)} trades)>'
 
     def new_order(self,
-                  size: float,
+                  size: Optional[float] = None,
+                  portion: Optional[float] = None,
                   limit: Optional[float] = None,
                   stop: Optional[float] = None,
                   sl: Optional[float] = None,
@@ -751,14 +767,19 @@ class _Broker:
         """
         Argument size indicates whether the order is long or short
         """
-        size = float(size)
+
         stop = stop and float(stop)
         limit = limit and float(limit)
         sl = sl and float(sl)
         tp = tp and float(tp)
 
-        is_long = size > 0
-        adjusted_price = self._adjusted_price(size)
+        if (size or portion) > 0:
+            is_long = True
+            sign = 1
+        else:
+            is_long = False
+            sign = -1
+        adjusted_price = self._adjusted_price(sign)
 
         if is_long:
             if not (sl or -np.inf) < (limit or stop or adjusted_price) < (tp or np.inf):
@@ -771,7 +792,7 @@ class _Broker:
                     "Short orders require: "
                     f"TP ({tp}) < LIMIT ({limit or stop or adjusted_price}) < SL ({sl})")
 
-        order = Order(self, size, limit, stop, sl, tp, trade, tag)
+        order = Order(self, size, portion, limit, stop, sl, tp, trade, tag)
         # Put the new order in the order queue,
         # inserting SL/TP/trade-closing orders in-front
         if trade:
@@ -797,7 +818,7 @@ class _Broker:
 
     def _adjusted_price(self, size=None, price=None) -> float:
         """
-        Long/short `price`, adjusted for commisions.
+        Long/short `unit price`, adjusted for commisions.
         In long positions, the adjusted price is a fraction higher, and vice versa.
         """
         return (price or self.last_price) * (1 + copysign(self._commission, size))
@@ -805,6 +826,7 @@ class _Broker:
     @property
     def equity(self) -> float:
         return self._cash + sum(trade.pl for trade in self.trades)
+
     @property
     def cash(self) -> float:
         return self._cash
@@ -909,20 +931,25 @@ class _Broker:
 
             # Adjust price to include commission (or bid-ask spread).
             # In long positions, the adjusted price is a fraction higher, and vice versa.
-            adjusted_price = self._adjusted_price(order.size, price)
+
 
             # If order size was specified proportionally,
             # precompute true size in units, accounting for margin and spread/commissions
-            # size = order.size
-            # if -1 < size < 1:
-            #     size = copysign(int((self.margin_available * self._leverage * abs(size))
-            #                         // adjusted_price), size)
-            #     # Not enough cash/margin even for a single unit
-            #     if not size:
-            #         self.orders.remove(order)
-            #         continue
-            # assert size == round(size)
-            need_size = int(size)
+
+
+            if (order.size or order.portion) > 0:
+                sign = 1
+            else:
+                sign = -1
+            adjusted_price = self._adjusted_price(sign, price)
+
+            if order.portion is not None:
+                need_size = copysign(self.margin_available * self._leverage * abs(order.portion) / adjusted_price, order.portion)
+                size = copysign(self.margin_available * self._leverage * abs(order.portion) / price, order.portion)
+            else:
+                need_size = copysign(self.margin_available * self._leverage * abs(order.size) / adjusted_price, order.size)
+                size = order.size
+
 
             if not self._hedging:
                 # Fill position by FIFO closing/reducing existing opposite-facing trades.
@@ -931,7 +958,7 @@ class _Broker:
                 for trade in list(self.trades):
                     if trade.is_long == order.is_long:
                         continue
-                    assert trade.size * order.size < 0
+                    assert trade.size * size < 0
 
                     # Order size greater than this opposite-directed existing trade,
                     # so it will be closed completely
@@ -1041,6 +1068,7 @@ class Backtest:
     instance, or `backtesting.backtesting.Backtest.optimize` to
     optimize it.
     """
+
     def __init__(self,
                  data: pd.DataFrame,
                  strategy: Type[Strategy],
@@ -1110,10 +1138,10 @@ class Backtest:
 
         # Convert index to datetime index
         if (not isinstance(data.index, pd.DatetimeIndex) and
-            not isinstance(data.index, pd.RangeIndex) and
-            # Numeric index with most large numbers
-            (data.index.is_numeric() and
-             (data.index > pd.Timestamp('1975').timestamp()).mean() > .8)):
+                not isinstance(data.index, pd.RangeIndex) and
+                # Numeric index with most large numbers
+                (data.index.is_numeric() and
+                 (data.index > pd.Timestamp('1975').timestamp()).mean() > .8)):
             try:
                 data.index = pd.to_datetime(data.index, infer_datetime_format=True)
             except ValueError:
@@ -1271,8 +1299,8 @@ class Backtest:
                  return_optimization: bool = False,
                  random_state: Optional[int] = None,
                  **kwargs) -> Union[pd.Series,
-                                    Tuple[pd.Series, pd.Series],
-                                    Tuple[pd.Series, pd.Series, dict]]:
+    Tuple[pd.Series, pd.Series],
+    Tuple[pd.Series, pd.Series, dict]]:
         """
         Optimize strategy parameters to an optimal combination.
         Returns result `pd.Series` of the best run.
@@ -1466,8 +1494,8 @@ class Backtest:
             return stats
 
         def _optimize_skopt() -> Union[pd.Series,
-                                       Tuple[pd.Series, pd.Series],
-                                       Tuple[pd.Series, pd.Series, dict]]:
+        Tuple[pd.Series, pd.Series],
+        Tuple[pd.Series, pd.Series, dict]]:
             try:
                 from skopt import forest_minimize
                 from skopt.callbacks import DeltaXStopper
