@@ -195,7 +195,8 @@ class Strategy(metaclass=ABCMeta):
     _FULL_EQUITY = __FULL_EQUITY(1 - sys.float_info.epsilon)
 
     def buy(self, *,
-            size: float = _FULL_EQUITY,
+            size: Optional[float] = None,
+            portion: Optional[float] = None,
             limit: Optional[float] = None,
             stop: Optional[float] = None,
             sl: Optional[float] = None,
@@ -208,34 +209,50 @@ class Strategy(metaclass=ABCMeta):
 
         See also `Strategy.sell()`.
         """
-        assert 0 < size < 1 or round(size) == size, \
-            "size must be a positive fraction of equity, or a positive whole number of units"
+        assert not((size is None) and (portion is None)), "either size or portion must be specified"
+        if size is not None:
+            assert 0 < size, "size must be a positive number"
+        else:
+            assert 0 < portion <= 1, "portion must must be a positive fraction of equity"
+            size = portion * self.cash
         return self._broker.new_order(size, limit, stop, sl, tp, tag)
 
     def sell(self, *,
-             size: float = _FULL_EQUITY,
-             limit: Optional[float] = None,
-             stop: Optional[float] = None,
-             sl: Optional[float] = None,
-             tp: Optional[float] = None,
-             tag: object = None):
+            size: Optional[float] = None,
+            portion: Optional[float] = None,
+            limit: Optional[float] = None,
+            stop: Optional[float] = None,
+            sl: Optional[float] = None,
+            tp: Optional[float] = None,
+            tag: object = None):
         """
-        Place a new short order. For explanation of parameters, see `Order` and its properties.
+        Place a new long order. For explanation of parameters, see `Order` and its properties.
 
-        See also `Strategy.buy()`.
+        See `Position.close()` and `Trade.close()` for closing existing positions.
 
-        .. note::
-            If you merely want to close an existing long position,
-            use `Position.close()` or `Trade.close()`.
+        See also `Strategy.sell()`.
         """
-        assert 0 < size < 1 or round(size) == size, \
-            "size must be a positive fraction of equity, or a positive whole number of units"
+        assert not((size is None) and (portion is None)), "either size or portion must be specified"
+        if size is not None:
+            assert 0 < size, "size must be a positive number"
+        else:
+            assert 0 < portion <= 1, "portion must must be a positive fraction of equity"
+            size = portion * self.cash
         return self._broker.new_order(-size, limit, stop, sl, tp, tag)
 
     @property
     def equity(self) -> float:
         """Current account equity (cash plus assets)."""
         return self._broker.equity
+
+    @property
+    def cash(self) -> float:
+        """Current account equity (cash plus assets)."""
+        return self._broker.cash
+    @property
+    def asset(self) -> float:
+        """Current account equity (cash plus assets)."""
+        return self._broker.equity - self._broker.cash
 
     @property
     def data(self) -> _Data:
@@ -701,9 +718,9 @@ class _Broker:
     def __init__(self, *, data, cash, commission, margin,
                  trade_on_close, hedging, exclusive_orders, index):
         assert 0 < cash, f"cash should be >0, is {cash}"
-        assert -.1 <= commission < .1, \
-            ("commission should be between -10% "
-             f"(e.g. market-maker's rebates) and 10% (fees), is {commission}")
+        assert -1 <= commission < 1, \
+            ("commission should be between -100% "
+             f"(e.g. market-maker's rebates) and 100% (fees), is {commission}")
         assert 0 < margin <= 1, f"margin should be between 0 and 1, is {margin}"
         self._data: _Data = data
         self._cash = cash
@@ -788,6 +805,9 @@ class _Broker:
     @property
     def equity(self) -> float:
         return self._cash + sum(trade.pl for trade in self.trades)
+    @property
+    def cash(self) -> float:
+        return self._cash
 
     @property
     def margin_available(self) -> float:
@@ -881,7 +901,7 @@ class _Broker:
                     assert order not in self.orders  # Removed when trade was closed
                 else:
                     # It's a trade.close() order, now done
-                    assert abs(_prev_size) >= abs(size) >= 1
+                    assert abs(_prev_size) >= abs(size)
                     self.orders.remove(order)
                 continue
 
@@ -893,15 +913,15 @@ class _Broker:
 
             # If order size was specified proportionally,
             # precompute true size in units, accounting for margin and spread/commissions
-            size = order.size
-            if -1 < size < 1:
-                size = copysign(int((self.margin_available * self._leverage * abs(size))
-                                    // adjusted_price), size)
-                # Not enough cash/margin even for a single unit
-                if not size:
-                    self.orders.remove(order)
-                    continue
-            assert size == round(size)
+            # size = order.size
+            # if -1 < size < 1:
+            #     size = copysign(int((self.margin_available * self._leverage * abs(size))
+            #                         // adjusted_price), size)
+            #     # Not enough cash/margin even for a single unit
+            #     if not size:
+            #         self.orders.remove(order)
+            #         continue
+            # assert size == round(size)
             need_size = int(size)
 
             if not self._hedging:
