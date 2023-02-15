@@ -250,13 +250,16 @@ class Strategy(metaclass=ABCMeta):
 
     @property
     def cash(self) -> float:
-        """Current account equity (cash plus assets)."""
+        """Current account cash."""
         return self._broker.cash
 
     @property
     def asset(self) -> float:
-        """Current account equity (cash plus assets)."""
+        """Current account asset."""
         return self._broker.equity - self._broker.cash
+
+
+
 
     @property
     def data(self) -> _Data:
@@ -374,6 +377,14 @@ class Position:
     def is_short(self) -> bool:
         """True if the position is short (position size is negative)."""
         return self.size < 0
+
+    @property
+    def avg_entry_price(self):
+        """quote position."""
+        ttl_quote_executed = np.sum([trade.size * trade.entry_price for trade in self.__broker.trades])
+        ttl_base_executed = np.sum([trade.size for trade in self.__broker.trades])
+        avg_price = ttl_quote_executed / ttl_base_executed
+        return avg_price
 
     def close(self, portion: float = 1.):
         """
