@@ -1,4 +1,4 @@
-Backtesting.py
+Backtesting
 ==============
 This is a fork of kernc's backtesting.py repo.
 
